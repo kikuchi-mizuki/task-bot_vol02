@@ -1,2 +1,2 @@
-web: gunicorn app:app
-cron: python -c "import schedule; import time; import subprocess; schedule.every().day.at('19:00').do(lambda: subprocess.run(['python', 'send_daily_agenda.py'])); [time.sleep(60) for _ in iter(int, 1)]" 
+web: gunicorn --bind 0.0.0.0:$PORT app:app
+cron: python cron.py 

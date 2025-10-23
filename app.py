@@ -42,9 +42,6 @@ from db import DBHelper
 from werkzeug.middleware.proxy_fix import ProxyFix
 from ai_service import AIService
 from send_daily_agenda import send_daily_agenda
-import schedule
-import threading
-import time
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -76,19 +73,6 @@ except Exception as e:
 
 # DBヘルパーの初期化
 db_helper = DBHelper()
-
-# 定期実行スケジューラーの設定
-def run_scheduler():
-    """定期実行スケジューラーを実行"""
-    schedule.every().day.at("19:00").do(send_daily_agenda)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)  # 1分ごとにチェック
-
-# バックグラウンドでスケジューラーを開始
-scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-scheduler_thread.start()
-logger.info("定期実行スケジューラーを開始しました（毎日19:00に明日の予定を送信）")
 
 @app.route("/callback", methods=['POST'])
 def callback():

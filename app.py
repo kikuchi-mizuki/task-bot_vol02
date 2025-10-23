@@ -1,10 +1,27 @@
 import os
 import logging
+import json
+import urllib3
 logging.basicConfig(level=logging.INFO)
-# Railway環境でcredentials.jsonを書き出す
-if "GOOGLE_CREDENTIALS_FILE" in os.environ:
-    with open("credentials.json", "w") as f:
-        f.write(os.environ["GOOGLE_CREDENTIALS_FILE"])
+
+# GOOGLE_CREDENTIALS_FILEの自動判定（JSON or パス）
+GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
+if GOOGLE_CREDENTIALS_FILE_ENV:
+    try:
+        # まずJSONとして読めるか？
+        parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
+        with open("credentials.json", "w") as f:
+            json.dump(parsed, f)
+        os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
+    except json.JSONDecodeError:
+        # JSONでなければパスとみなす
+        if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
+            os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
+        else:
+            raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
+else:
+    # 既存運用（Config.GOOGLE_CREDENTIALS_FILE を使うなど）
+    os.environ["GOOGLE_CREDENTIALS_PATH"] = getattr(Config, "GOOGLE_CREDENTIALS_FILE", "credentials.json")
 
 from flask import Flask, request, abort, render_template_string, redirect, url_for, session, Response, make_response
 from linebot import LineBotApi, WebhookHandler
@@ -15,9 +32,9 @@ from config import Config
 import json
 from datetime import datetime
 import pickle
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+# from googleapiclient.discovery import build  # 使ってなければ削除
 from db import DBHelper
 from werkzeug.middleware.proxy_fix import ProxyFix
 from ai_service import AIService
@@ -29,8 +46,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# ProxyFixを追加
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+# ProxyFixを追加（Railway対応）
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # 設定の検証
 try:
@@ -57,8 +74,11 @@ db_helper = DBHelper()
 @app.route("/callback", methods=['POST'])
 def callback():
     """LINE Webhookのコールバックエンドポイント"""
-    # リクエストヘッダーからX-Line-Signatureを取得
-    signature = request.headers['X-Line-Signature']
+    # リクエストヘッダーからX-Line-Signatureを取得（安全に）
+    signature = request.headers.get('X-Line-Signature')
+    if not signature:
+        logger.error('X-Line-Signature ヘッダがありません')
+        abort(400)
 
     # リクエストボディを取得
     body = request.get_data(as_text=True)
@@ -160,12 +180,14 @@ def health():
 @app.route("/test", methods=['GET'])
 def test():
     """テスト用エンドポイント"""
+    path = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+    is_google_ok = os.path.exists(path)
     return {
         "message": "LINE Calendar Bot Test",
         "config": {
             "line_configured": bool(Config.LINE_CHANNEL_ACCESS_TOKEN and Config.LINE_CHANNEL_SECRET),
             "openai_configured": bool(Config.OPENAI_API_KEY),
-            "google_configured": bool(os.path.exists(Config.GOOGLE_CREDENTIALS_FILE))
+            "google_configured": is_google_ok,
         }
     }
 
@@ -248,18 +270,22 @@ def onetime_login():
         db_helper.mark_onetime_used(code)
         
         try:
-            # Google OAuth認証フローを開始
+            # Google OAuth認証フローを開始（Flow使用）
             SCOPES = ['https://www.googleapis.com/auth/calendar']
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            # リダイレクトURIを環境変数から取得
-            import os
+            path = os.environ.get('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
             base_url = os.getenv('BASE_URL')
             if not base_url:
-                raise ValueError("BASE_URL環境変数が設定されていません")
-            flow.redirect_uri = base_url + '/oauth2callback'
+                raise ValueError('BASE_URL環境変数が設定されていません')
+            redirect_uri = base_url.rstrip('/') + '/oauth2callback'
+            
+            flow = Flow.from_client_secrets_file(
+                path,
+                scopes=SCOPES,
+                redirect_uri=redirect_uri
+            )
             
             # デバッグ用ログ（機微情報は出さない）
-            logger.debug("[DEBUG] OAuthフロー初期化済み（BASE_URL/Redirect URIは非表示）")
+            logger.debug('[DEBUG] OAuthフロー初期化済み（BASE_URL/Redirect URIは非表示）')
             
             auth_url, state = flow.authorization_url(
                 access_type='offline',
@@ -303,42 +329,31 @@ def oauth2callback():
         line_user_id = db_helper.get_line_user_id_by_state(state)
         if not line_user_id:
             return make_response("認証セッションが無効です", 400)
-        # 新たにflowを生成
+        # 新たにflowを生成（Flow使用、monkey patch撤去）
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-        # リダイレクトURIを環境変数から取得
-        import os
+        path = os.environ.get('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
         base_url = os.getenv('BASE_URL')
         if not base_url:
-            raise ValueError("BASE_URL環境変数が設定されていません")
-        flow.redirect_uri = base_url + '/oauth2callback'
+            raise ValueError('BASE_URL環境変数が設定されていません')
+        redirect_uri = base_url.rstrip('/') + '/oauth2callback'
+        
+        flow = Flow.from_client_secrets_file(
+            path,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri
+        )
         
         # デバッグ用ログ（機微情報は出さない）
-        logger.debug("[DEBUG] oauth2callback 実行（BASE_URL/Redirect URIは非表示）")
-        # --- ここまで ---
-        # 認証コードを取得してトークンを交換（スコープ警告を無視）
-        import warnings
-        import oauthlib.oauth2.rfc6749.parameters
-        # スコープ検証を無効化
-        original_validate_token_parameters = oauthlib.oauth2.rfc6749.parameters.validate_token_parameters
-        def dummy_validate_token_parameters(params):
-            return True
-        oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = dummy_validate_token_parameters
+        logger.debug('[DEBUG] oauth2callback 実行（BASE_URL/Redirect URIは非表示）')
         
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                flow.fetch_token(authorization_response=request.url)
-        finally:
-            # 元の関数を復元
-            oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = original_validate_token_parameters
-            
-        credentials = flow.credentials
-        # トークンをDBに保存
-        token_data = pickle.dumps(credentials)
-        db_helper.save_google_token(line_user_id, token_data)
-        # ワンタイムコードを使用済みに
-        db_helper.mark_onetime_code_used(line_user_id)
+        flow.fetch_token(authorization_response=request.url)
+        
+        creds = flow.credentials
+        # JSON 形式で保存（推奨）
+        db_helper.save_google_token_json(line_user_id, creds.to_json())
+        
+        # ワンタイムコードは state 起点で使用済みにするなど、一貫したAPIに統一
+        db_helper.mark_onetime_used_by_state(state)
         # 認証完了画面
         html = "<h2>Google認証が完了しました。LINEに戻って操作を続けてください。</h2>"
         return make_response(html, 200)
@@ -477,6 +492,7 @@ if __name__ == "__main__":
     # ネットワーク設定の確認
     import requests
     logger.info(f"Requests バージョン: {requests.__version__}")
-    logger.info(f"urllib3 バージョン: {requests.packages.urllib3.__version__}")
+    logger.info(f"urllib3 バージョン: {urllib3.__version__}")
     
+    # 本番は gunicorn 起動（gunicorn app:app）推奨。デバッグはローカルのみ
     app.run(debug=True, host='0.0.0.0', port=port) 

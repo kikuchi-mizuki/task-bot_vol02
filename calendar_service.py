@@ -1,10 +1,9 @@
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import os
-import pickle
+import json
 import pytz
 from config import Config
 from dateutil import parser
@@ -28,26 +27,41 @@ class GoogleCalendarService:
         self._authenticate()
     
     def _authenticate(self):
-        """Google Calendar APIの認証を行います"""
-        # トークンファイルが存在する場合は読み込み
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
-                self.creds = pickle.load(token)
-            # 有効な認証情報がない場合はWebフローで認証する（run_local_serverは呼ばない）
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-        else:
-            self.creds = None
-        
-        if self.creds:
-            self.service = build('calendar', 'v3', credentials=self.creds)
-        else:
-            self.service = None  # 認証情報がなければserviceはNoneのまま
+        """Google Calendar APIの認証を行います（非推奨のpickle形式は使用しない）"""
+        # このメソッドは非推奨。ユーザーごとの認証は_get_user_credentialsを使用
+        self.creds = None
+        self.service = None
     
     def _get_user_credentials(self, line_user_id):
-        """ユーザーの認証トークンをDBから取得"""
+        """ユーザーの認証トークンをDBから取得（JSON形式対応）"""
         try:
             print(f"[DEBUG] _get_user_credentials開始: line_user_id={line_user_id}")
+            
+            # まずJSON形式で取得を試行
+            json_data = self.db_helper.get_google_token_json(line_user_id)
+            if json_data:
+                try:
+                    print(f"[DEBUG] JSON形式のトークンデータを取得")
+                    credentials = Credentials.from_authorized_user_info(json.loads(json_data))
+                    print(f"[DEBUG] JSON形式のトークンデータのデシリアライズ完了: credentials={credentials is not None}")
+                    
+                    # トークンの有効期限をチェック
+                    if credentials and credentials.expired and credentials.refresh_token:
+                        print(f"[DEBUG] トークンのリフレッシュ開始")
+                        credentials.refresh(Request())
+                        print(f"[DEBUG] トークンのリフレッシュ完了")
+                        # 更新されたトークンをDBに保存
+                        self.db_helper.save_google_token_json(line_user_id, credentials.to_json())
+                        print(f"[DEBUG] 更新されたトークンをDBに保存完了")
+                    
+                    return credentials
+                    
+                except Exception as e:
+                    print(f"[DEBUG] JSON形式のトークン読み込みエラー: {e}")
+                    # JSON形式で失敗した場合は古いpickle形式を試行
+                    pass
+            
+            # 古いpickle形式のトークンを取得（後方互換性）
             token_data = self.db_helper.get_google_token(line_user_id)
             print(f"[DEBUG] DBから取得したトークンデータ: {token_data is not None}")
             
@@ -56,24 +70,24 @@ class GoogleCalendarService:
                 return None
             
             try:
-                print(f"[DEBUG] トークンデータのデシリアライズ開始")
+                print(f"[DEBUG] 古いpickle形式のトークンデータのデシリアライズ開始")
+                import pickle
                 credentials = pickle.loads(token_data)
-                print(f"[DEBUG] トークンデータのデシリアライズ完了: credentials={credentials is not None}")
+                print(f"[DEBUG] 古いpickle形式のトークンデータのデシリアライズ完了: credentials={credentials is not None}")
                 
                 # トークンの有効期限をチェック
                 if credentials and credentials.expired and credentials.refresh_token:
                     print(f"[DEBUG] トークンのリフレッシュ開始")
                     credentials.refresh(Request())
                     print(f"[DEBUG] トークンのリフレッシュ完了")
-                    # 更新されたトークンをDBに保存
-                    updated_token_data = pickle.dumps(credentials)
-                    self.db_helper.save_google_token(line_user_id, updated_token_data)
-                    print(f"[DEBUG] 更新されたトークンをDBに保存完了")
+                    # 更新されたトークンをJSON形式で保存（移行）
+                    self.db_helper.save_google_token_json(line_user_id, credentials.to_json())
+                    print(f"[DEBUG] 更新されたトークンをJSON形式でDBに保存完了")
                 
                 return credentials
                 
             except Exception as e:
-                print(f"[DEBUG] トークンの読み込みエラー: {e}")
+                print(f"[DEBUG] 古いpickle形式のトークン読み込みエラー: {e}")
                 import traceback
                 traceback.print_exc()
                 return None

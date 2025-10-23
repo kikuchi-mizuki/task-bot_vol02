@@ -167,6 +167,25 @@ class DBHelper:
             ''', (line_user_id, google_token_bytes, now, now))
         self.conn.commit()
 
+    def save_google_token_json(self, line_user_id, json_str):
+        """JSON形式でGoogle認証情報を保存（推奨）"""
+        now = datetime.utcnow().isoformat()
+        print(f"[DEBUG] save_google_token_json: line_user_id={line_user_id}, json_length={len(json_str) if json_str else 0}, time={now}")
+        c = self.conn.cursor()
+        if self.is_postgres:
+            c.execute('''
+                INSERT INTO users (line_user_id, google_token, created_at, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (line_user_id) DO UPDATE SET google_token=EXCLUDED.google_token, updated_at=EXCLUDED.updated_at
+            ''', (line_user_id, PG_BINARY(json_str.encode('utf-8')), now, now))
+        else:
+            c.execute('''
+                INSERT INTO users (line_user_id, google_token, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(line_user_id) DO UPDATE SET google_token=excluded.google_token, updated_at=excluded.updated_at
+            ''', (line_user_id, json_str.encode('utf-8'), now, now))
+        self.conn.commit()
+
     def get_google_token(self, line_user_id):
         def operation():
             c = self.conn.cursor()
@@ -177,6 +196,28 @@ class DBHelper:
             row = c.fetchone()
             print(f"[DEBUG] get_google_token: line_user_id={line_user_id}, token_found={row is not None}, token_length={len(row[0]) if row and row[0] else 0}")
             return row[0] if row else None
+        
+        return self._execute_with_retry(operation)
+
+    def get_google_token_json(self, line_user_id):
+        """JSON形式でGoogle認証情報を取得"""
+        def operation():
+            c = self.conn.cursor()
+            if self.is_postgres:
+                c.execute('SELECT google_token FROM users WHERE line_user_id=%s', (line_user_id,))
+            else:
+                c.execute('SELECT google_token FROM users WHERE line_user_id=?', (line_user_id,))
+            row = c.fetchone()
+            if row and row[0]:
+                try:
+                    # バイト列を文字列に変換
+                    if isinstance(row[0], bytes):
+                        return row[0].decode('utf-8')
+                    return row[0]
+                except (UnicodeDecodeError, AttributeError):
+                    # 古いpickle形式の場合はNoneを返す
+                    return None
+            return None
         
         return self._execute_with_retry(operation)
 
@@ -282,6 +323,29 @@ class DBHelper:
             c.execute('UPDATE onetimes SET used = 1 WHERE code = %s', (code,))
         else:
             c.execute('UPDATE onetimes SET used = 1 WHERE code = ?', (code,))
+        self.conn.commit()
+
+    def mark_onetime_used_by_state(self, state):
+        """stateからワンタイムコードを使用済みにマーク（統一API）"""
+        c = self.conn.cursor()
+        if self.is_postgres:
+            c.execute('''
+                UPDATE onetimes SET used = 1 
+                WHERE code IN (
+                    SELECT code FROM onetimes o 
+                    JOIN oauth_states os ON o.line_user_id = os.line_user_id 
+                    WHERE os.state = %s
+                )
+            ''', (state,))
+        else:
+            c.execute('''
+                UPDATE onetimes SET used = 1 
+                WHERE code IN (
+                    SELECT o.code FROM onetimes o 
+                    JOIN oauth_states os ON o.line_user_id = os.line_user_id 
+                    WHERE os.state = ?
+                )
+            ''', (state,))
         self.conn.commit()
 
     def cleanup_expired_onetimes(self):

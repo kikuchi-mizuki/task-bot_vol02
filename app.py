@@ -13,18 +13,18 @@ if GOOGLE_CREDENTIALS_FILE_ENV:
         with open("credentials.json", "w") as f:
             json.dump(parsed, f)
         os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
-        logger.info("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
+        print("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
     except json.JSONDecodeError:
         # JSONでなければパスとみなす
         if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
             os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
-            logger.info(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
+            print(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
         else:
             raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
 else:
     # 既存運用（Config.GOOGLE_CREDENTIALS_FILE を使うなど）
     os.environ["GOOGLE_CREDENTIALS_PATH"] = getattr(Config, "GOOGLE_CREDENTIALS_FILE", "credentials.json")
-    logger.info(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
+    print(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
 
 from flask import Flask, request, abort, render_template_string, redirect, url_for, session, Response, make_response
 from linebot import LineBotApi, WebhookHandler

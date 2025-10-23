@@ -42,6 +42,12 @@ class GoogleCalendarService:
             if json_data:
                 try:
                     print(f"[DEBUG] JSON形式のトークンデータを取得")
+                    # バイト列の場合は文字列に変換
+                    if isinstance(json_data, bytes):
+                        json_data = json_data.decode('utf-8')
+                    elif hasattr(json_data, 'tobytes'):  # memoryviewの場合
+                        json_data = json_data.tobytes().decode('utf-8')
+                    
                     credentials = Credentials.from_authorized_user_info(json.loads(json_data))
                     print(f"[DEBUG] JSON形式のトークンデータのデシリアライズ完了: credentials={credentials is not None}")
                     
@@ -58,6 +64,8 @@ class GoogleCalendarService:
                     
                 except Exception as e:
                     print(f"[DEBUG] JSON形式のトークン読み込みエラー: {e}")
+                    import traceback
+                    traceback.print_exc()
                     # JSON形式で失敗した場合は古いpickle形式を試行
                     pass
             
@@ -72,7 +80,17 @@ class GoogleCalendarService:
             try:
                 print(f"[DEBUG] 古いpickle形式のトークンデータのデシリアライズ開始")
                 import pickle
-                credentials = pickle.loads(token_data)
+                
+                # データの型を確認して適切に処理
+                if isinstance(token_data, bytes):
+                    # バイト列の場合はそのままpickle.loads
+                    credentials = pickle.loads(token_data)
+                elif hasattr(token_data, 'tobytes'):  # memoryviewの場合
+                    credentials = pickle.loads(token_data.tobytes())
+                else:
+                    # その他の場合は文字列として扱う
+                    credentials = pickle.loads(token_data)
+                
                 print(f"[DEBUG] 古いpickle形式のトークンデータのデシリアライズ完了: credentials={credentials is not None}")
                 
                 # トークンの有効期限をチェック

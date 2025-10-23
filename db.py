@@ -212,10 +212,23 @@ class DBHelper:
                 try:
                     # バイト列を文字列に変換
                     if isinstance(row[0], bytes):
-                        return row[0].decode('utf-8')
-                    return row[0]
-                except (UnicodeDecodeError, AttributeError):
-                    # 古いpickle形式の場合はNoneを返す
+                        data = row[0].decode('utf-8')
+                        # JSONとして有効かチェック
+                        import json
+                        json.loads(data)  # これでJSONとして有効かチェック
+                        return data
+                    elif hasattr(row[0], 'tobytes'):  # memoryviewの場合
+                        data = row[0].tobytes().decode('utf-8')
+                        import json
+                        json.loads(data)  # これでJSONとして有効かチェック
+                        return data
+                    else:
+                        # 文字列の場合
+                        import json
+                        json.loads(row[0])  # これでJSONとして有効かチェック
+                        return row[0]
+                except (UnicodeDecodeError, AttributeError, json.JSONDecodeError):
+                    # 古いpickle形式や無効なJSONの場合はNoneを返す
                     return None
             return None
         

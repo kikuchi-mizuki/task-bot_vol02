@@ -123,6 +123,11 @@ class LineBotHandler:
                     end_datetime = self.jst.localize(end_datetime)
                 if not self.calendar_service or not self.ai_service:
                     return TextSendMessage(text="カレンダーサービスまたはAIサービスが初期化されていません。")
+                
+                # 移動時間フラグをチェック
+                has_travel = event_info.get('has_travel', False)
+                print(f"[DEBUG] 強制追加: 移動時間フラグ = {has_travel}")
+                
                 success, message, result = self.calendar_service.add_event(
                     event_info['title'],
                     start_datetime,
@@ -131,6 +136,45 @@ class LineBotHandler:
                     line_user_id=line_user_id,
                     force_add=True
                 )
+                
+                # 移動時間フラグがある場合は、移動時間も追加
+                if success and has_travel:
+                    print(f"[DEBUG] 移動時間を追加開始")
+                    # 移動時間の予定を作成
+                    from datetime import timedelta
+                    import pytz
+                    jst = pytz.timezone('Asia/Tokyo')
+                    
+                    # 往路（1時間前）
+                    travel_before_start = start_datetime - timedelta(hours=1)
+                    travel_before_end = start_datetime
+                    
+                    # 復路（1時間後）
+                    travel_after_start = end_datetime
+                    travel_after_end = end_datetime + timedelta(hours=1)
+                    
+                    # 往路を追加
+                    travel_success1, travel_message1, travel_result1 = self.calendar_service.add_event(
+                        "移動時間（往路）",
+                        travel_before_start,
+                        travel_before_end,
+                        "移動のための時間",
+                        line_user_id=line_user_id,
+                        force_add=True
+                    )
+                    print(f"[DEBUG] 往路追加結果: {travel_success1}")
+                    
+                    # 復路を追加
+                    travel_success2, travel_message2, travel_result2 = self.calendar_service.add_event(
+                        "移動時間（復路）",
+                        travel_after_start,
+                        travel_after_end,
+                        "移動のための時間",
+                        line_user_id=line_user_id,
+                        force_add=True
+                    )
+                    print(f"[DEBUG] 復路追加結果: {travel_success2}")
+                
                 self.db_helper.delete_pending_event(line_user_id)
                 response_text = self.ai_service.format_event_confirmation(success, message, result)
                 return TextSendMessage(text=response_text)
@@ -226,8 +270,24 @@ class LineBotHandler:
                     if end_datetime.tzinfo is None:
                         end_datetime = self.jst.localize(end_datetime)
                     
+                    # 移動時間を含む場合の重複チェック
+                    # 移動キーワードをチェック
+                    travel_keywords = ['移動', '移動あり', '移動時間', '移動必要']
+                    has_travel = any(keyword in title or keyword in description for keyword in travel_keywords)
+                    
+                    # チェックする時間範囲を決定
+                    check_start = start_datetime
+                    check_end = end_datetime
+                    
+                    if has_travel:
+                        # 移動時間を含む場合は、往路（1時間前）と復路（1時間後）も含めてチェック
+                        from datetime import timedelta
+                        check_start = start_datetime - timedelta(hours=1)  # 往路
+                        check_end = end_datetime + timedelta(hours=1)     # 復路
+                        print(f"[DEBUG] 移動時間を含む重複チェック: {check_start} 〜 {check_end}")
+                    
                     # 既存予定をチェック
-                    events = self.calendar_service.get_events_for_time_range(start_datetime, end_datetime, line_user_id)
+                    events = self.calendar_service.get_events_for_time_range(check_start, check_end, line_user_id)
                     if events:
                         print(f"[DEBUG] 重複予定を検出: {title}")
                         # 重複確認メッセージを表示
@@ -256,14 +316,18 @@ class LineBotHandler:
                             
                             response_text += f"- {event['title']}\n({time_str})\n"
                         
+                        if has_travel:
+                            response_text += "\n※移動時間（往路・復路）も含めて重複チェックしています。\n"
+                        
                         response_text += "\nそれでも追加しますか？\n「はい」と返信してください。"
                         
-                        # 予定情報をpending_eventsに保存
+                        # 予定情報をpending_eventsに保存（移動時間フラグも含める）
                         event_info = {
                             'title': title,
                             'start_datetime': start_datetime_str,
                             'end_datetime': end_datetime_str,
-                            'description': description
+                            'description': description,
+                            'has_travel': has_travel
                         }
                         import json
                         self.db_helper.save_pending_event(line_user_id, json.dumps(event_info))

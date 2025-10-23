@@ -14,13 +14,15 @@ def format_rich_agenda(events_info, is_tomorrow=False):
     date = events_info[0]['date']
     dt = datetime.strptime(date, "%Y-%m-%d")
     weekday = "月火水木金土日"[dt.weekday()]
-    header = f"✅明日の予定です！\n\n📅 {dt.strftime('%Y/%m/%d')} ({weekday})\n━━━━━━━━━━" if is_tomorrow else f"✅今日の予定です！\n\n📅 {dt.strftime('%Y/%m/%d')} ({weekday})\n━━━━━━━━━━"
+    
+    # 画像の形式に合わせた表示
+    header = f"✅明日の予定です！\n\n📅 {dt.strftime('%Y/%m/%d')} ({weekday})\n━━━━━━━━━━"
     lines = []
     for i, event in enumerate(events_info[0]['events'], 1):
         title = event['title']
         start = datetime.fromisoformat(event['start']).strftime('%H:%M')
         end = datetime.fromisoformat(event['end']).strftime('%H:%M')
-        lines.append(f"{i}. {title}\n⏰ {start}～{end}\n")
+        lines.append(f"{i}. {title}\n⏰ {start}~{end}\n")
     footer = "━━━━━━━━━━"
     return f"{header}\n" + "\n".join(lines) + footer
 

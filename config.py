@@ -39,7 +39,8 @@ class Config:
         if missing_vars:
             raise ValueError(f"必要な環境変数が設定されていません: {', '.join(missing_vars)}")
         
-        # Google認証ファイルの存在確認
-        if not os.path.exists(cls.GOOGLE_CREDENTIALS_FILE):
-            print(f"警告: Google認証ファイル '{cls.GOOGLE_CREDENTIALS_FILE}' が見つかりません。")
+        # Google認証ファイルの存在確認（環境変数で動的に設定される場合は警告しない）
+        credentials_path = os.environ.get("GOOGLE_CREDENTIALS_PATH", cls.GOOGLE_CREDENTIALS_FILE)
+        if not os.path.exists(credentials_path):
+            print(f"警告: Google認証ファイル '{credentials_path}' が見つかりません。")
             print("Google Calendar APIを使用するには、credentials.jsonファイルが必要です。") 

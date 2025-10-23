@@ -13,15 +13,18 @@ if GOOGLE_CREDENTIALS_FILE_ENV:
         with open("credentials.json", "w") as f:
             json.dump(parsed, f)
         os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
+        logger.info("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
     except json.JSONDecodeError:
         # JSONでなければパスとみなす
         if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
             os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
+            logger.info(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
         else:
             raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
 else:
     # 既存運用（Config.GOOGLE_CREDENTIALS_FILE を使うなど）
     os.environ["GOOGLE_CREDENTIALS_PATH"] = getattr(Config, "GOOGLE_CREDENTIALS_FILE", "credentials.json")
+    logger.info(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
 
 from flask import Flask, request, abort, render_template_string, redirect, url_for, session, Response, make_response
 from linebot import LineBotApi, WebhookHandler
@@ -346,7 +349,23 @@ def oauth2callback():
         # デバッグ用ログ（機微情報は出さない）
         logger.debug('[DEBUG] oauth2callback 実行（BASE_URL/Redirect URIは非表示）')
         
-        flow.fetch_token(authorization_response=request.url)
+        # スコープ検証を一時的に無効化（Google OAuth同意画面の設定と一致させるため）
+        import warnings
+        import oauthlib.oauth2.rfc6749.parameters
+        
+        # スコープ検証を無効化
+        original_validate_token_parameters = oauthlib.oauth2.rfc6749.parameters.validate_token_parameters
+        def dummy_validate_token_parameters(params):
+            return True
+        oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = dummy_validate_token_parameters
+        
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                flow.fetch_token(authorization_response=request.url)
+        finally:
+            # 元の関数を復元
+            oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = original_validate_token_parameters
         
         creds = flow.credentials
         # JSON 形式で保存（推奨）

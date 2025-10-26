@@ -42,6 +42,9 @@ from db import DBHelper
 from werkzeug.middleware.proxy_fix import ProxyFix
 from ai_service import AIService
 from send_daily_agenda import send_daily_agenda
+import threading
+import schedule
+import time
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -73,6 +76,30 @@ except Exception as e:
 
 # DBヘルパーの初期化
 db_helper = DBHelper()
+
+# 定期実行スケジューラーの設定（バックアップ用）
+def run_scheduler_backup():
+    """定期実行スケジューラーを実行（バックアップ用）"""
+    import pytz
+    from datetime import datetime
+    
+    jst = pytz.timezone('Asia/Tokyo')
+    schedule.every().day.at("19:00").do(send_daily_agenda)
+    
+    logger.info("バックアップ用スケジューラーを開始しました（毎日19:00に明日の予定を送信）")
+    
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # 1分ごとにチェック
+        # 毎時間ログ出力
+        current_time = datetime.now(jst)
+        if current_time.minute == 0:
+            logger.info(f"バックアップスケジューラー実行中... 現在時刻: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+# バックグラウンドでスケジューラーを開始（cronジョブが動作しない場合のバックアップ）
+scheduler_thread = threading.Thread(target=run_scheduler_backup, daemon=True)
+scheduler_thread.start()
+logger.info("バックアップ用定期実行スケジューラーを開始しました")
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -498,6 +525,21 @@ def api_debug_users():
     c.execute('SELECT line_user_id, LENGTH(google_token), created_at, updated_at FROM users')
     rows = c.fetchall()
     return jsonify({'users': rows})
+
+@app.route('/api/test_daily_agenda', methods=['POST'])
+def api_test_daily_agenda():
+    """手動で明日の予定一覧送信をテスト"""
+    import os
+    from flask import request, jsonify
+    secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
+    req_token = request.args.get('token')
+    if not secret_token or req_token != secret_token:
+        return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
+    try:
+        send_daily_agenda()
+        return jsonify({'status': 'ok', 'message': '明日の予定一覧を送信しました'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

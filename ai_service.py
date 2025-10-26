@@ -315,14 +315,24 @@ class AIService:
             next_monday = now + timedelta(days=days_until_monday)
             next_sunday = next_monday + timedelta(days=6)
             
+            # AIが抽出した時間条件を取得（最初の日付から）
+            ai_time_condition = None
+            if new_dates and len(new_dates) > 0:
+                first_date = new_dates[0]
+                ai_time_condition = {
+                    'time': first_date.get('time', '00:00'),
+                    'end_time': first_date.get('end_time', '23:59')
+                }
+                print(f"[DEBUG] AIが抽出した時間条件: {ai_time_condition}")
+            
             # 来週の7日間を個別の日付として追加
             current_date = next_monday
             week_dates = []
             for i in range(7):
                 week_dates.append({
                     'date': current_date.strftime('%Y-%m-%d'),
-                    'time': '00:00',
-                    'end_time': '23:59'
+                    'time': ai_time_condition['time'] if ai_time_condition else '00:00',
+                    'end_time': ai_time_condition['end_time'] if ai_time_condition else '23:59'
                 })
                 current_date += timedelta(days=1)
             
@@ -345,14 +355,24 @@ class AIService:
             next_next_monday = now + timedelta(days=days_until_monday + 7)
             next_next_sunday = next_next_monday + timedelta(days=6)
             
+            # AIが抽出した時間条件を取得（最初の日付から）
+            ai_time_condition = None
+            if new_dates and len(new_dates) > 0:
+                first_date = new_dates[0]
+                ai_time_condition = {
+                    'time': first_date.get('time', '00:00'),
+                    'end_time': first_date.get('end_time', '23:59')
+                }
+                print(f"[DEBUG] AIが抽出した時間条件: {ai_time_condition}")
+            
             # 再来週の7日間を個別の日付として追加
             current_date = next_next_monday
             week_dates = []
             for i in range(7):
                 week_dates.append({
                     'date': current_date.strftime('%Y-%m-%d'),
-                    'time': '00:00',
-                    'end_time': '23:59'
+                    'time': ai_time_condition['time'] if ai_time_condition else '00:00',
+                    'end_time': ai_time_condition['end_time'] if ai_time_condition else '23:59'
                 })
                 current_date += timedelta(days=1)
             

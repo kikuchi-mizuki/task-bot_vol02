@@ -216,11 +216,25 @@ class AIService:
                 next_monday = now + timedelta(days=days_until_monday)
                 next_sunday = next_monday + timedelta(days=6)
                 
-                d['date'] = next_monday.strftime('%Y-%m-%d')
-                d['end_date'] = next_sunday.strftime('%Y-%m-%d')
-                d['time'] = '00:00'
-                d['end_time'] = '23:59'
-                print(f"[DEBUG] 来週の処理: {d['date']} 〜 {d['end_date']}")
+                # 来週の7日間を個別の日付として追加
+                current_date = next_monday
+                week_dates = []
+                for i in range(7):
+                    week_dates.append({
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'time': '00:00',
+                        'end_time': '23:59'
+                    })
+                    current_date += timedelta(days=1)
+                
+                # 元の日付情報を来週の最初の日（月曜日）に置き換え
+                d.update(week_dates[0])
+                print(f"[DEBUG] 来週の処理: {week_dates[0]['date']} 〜 {week_dates[6]['date']} (7日間)")
+                
+                # 残りの6日間を追加
+                for i in range(1, 7):
+                    new_dates.append(week_dates[i])
+                    print(f"[DEBUG] 来週の日付{i+1}を追加: {week_dates[i]['date']}")
             
             # 再来週（再来週の月曜日〜日曜日）
             if re.search(r'再来週', phrase):
@@ -231,11 +245,25 @@ class AIService:
                 next_next_monday = now + timedelta(days=days_until_monday + 7)
                 next_next_sunday = next_next_monday + timedelta(days=6)
                 
-                d['date'] = next_next_monday.strftime('%Y-%m-%d')
-                d['end_date'] = next_next_sunday.strftime('%Y-%m-%d')
-                d['time'] = '00:00'
-                d['end_time'] = '23:59'
-                print(f"[DEBUG] 再来週の処理: {d['date']} 〜 {d['end_date']}")
+                # 再来週の7日間を個別の日付として追加
+                current_date = next_next_monday
+                week_dates = []
+                for i in range(7):
+                    week_dates.append({
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'time': '00:00',
+                        'end_time': '23:59'
+                    })
+                    current_date += timedelta(days=1)
+                
+                # 元の日付情報を再来週の最初の日（月曜日）に置き換え
+                d.update(week_dates[0])
+                print(f"[DEBUG] 再来週の処理: {week_dates[0]['date']} 〜 {week_dates[6]['date']} (7日間)")
+                
+                # 残りの6日間を追加
+                for i in range(1, 7):
+                    new_dates.append(week_dates[i])
+                    print(f"[DEBUG] 再来週の日付{i+1}を追加: {week_dates[i]['date']}")
             
             # 来月（来月の1日〜末日）
             if re.search(r'来月', phrase):

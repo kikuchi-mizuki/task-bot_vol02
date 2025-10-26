@@ -485,30 +485,36 @@ class LineBotHandler:
                         events = self.calendar_service.get_events_for_time_range(start_dt, end_dt, line_user_id)
                         print(f"[DEBUG] 日付{i+1}の取得予定: {events}")
                         
-                        # AIが抽出した時間条件に基づいて空き時間を計算
-                        # 例：「19時以降」→19:00〜23:59、「午前中」→00:00〜12:00
-                        slot_start = start_time
-                        slot_end = end_time
+                        # AIが抽出した時間条件と8:00〜22:00の範囲を組み合わせて空き時間を計算
+                        # 例：「19時以降」→19:00〜22:00、「午前中」→08:00〜12:00
+                        ai_start = start_time
+                        ai_end = end_time
                         
-                        print(f"[DEBUG] 日付{i+1}のスロット範囲: slot_start={slot_start}, slot_end={slot_end}")
+                        # 8:00〜22:00の範囲内に制限
+                        display_start = max(ai_start, "08:00")
+                        display_end = min(ai_end, "22:00")
                         
-                        slot_start_dt = jst.localize(datetime.strptime(f"{date_str} {slot_start}", "%Y-%m-%d %H:%M"))
-                        slot_end_dt = jst.localize(datetime.strptime(f"{date_str} {slot_end}", "%Y-%m-%d %H:%M"))
+                        print(f"[DEBUG] 日付{i+1}のAI時間条件: {ai_start}〜{ai_end}")
+                        print(f"[DEBUG] 日付{i+1}の表示範囲: {display_start}〜{display_end}")
                         
-                        print(f"[DEBUG] 日付{i+1}のスロットdatetime: slot_start_dt={slot_start_dt}, slot_end_dt={slot_end_dt}")
-                        
-                        if slot_start < slot_end:
+                        # 表示範囲が有効な場合のみ空き時間を計算
+                        if display_start < display_end:
+                            slot_start_dt = jst.localize(datetime.strptime(f"{date_str} {display_start}", "%Y-%m-%d %H:%M"))
+                            slot_end_dt = jst.localize(datetime.strptime(f"{date_str} {display_end}", "%Y-%m-%d %H:%M"))
+                            
+                            print(f"[DEBUG] 日付{i+1}のスロットdatetime: slot_start_dt={slot_start_dt}, slot_end_dt={slot_end_dt}")
+                            
                             print(f"[DEBUG] 日付{i+1}の空き時間計算開始")
                             free_slots = self.calendar_service.find_free_slots_for_day(slot_start_dt, slot_end_dt, events)
                             print(f"[DEBUG] 日付{i+1}の空き時間結果: {free_slots}")
                         else:
-                            print(f"[DEBUG] 日付{i+1}のスロット範囲が無効: {slot_start} >= {slot_end}")
+                            print(f"[DEBUG] 日付{i+1}の表示範囲が無効: {display_start} >= {display_end}")
                             free_slots = []
                         
                         free_slots_by_frame.append({
                             'date': date_str,
-                            'start_time': slot_start,
-                            'end_time': slot_end,
+                            'start_time': display_start,
+                            'end_time': display_end,
                             'free_slots': free_slots
                         })
                         print(f"[DEBUG] 日付{i+1}のfree_slots_by_frame追加完了")

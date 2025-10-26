@@ -207,38 +207,6 @@ class AIService:
                 d['time'] = '00:00'
                 d['end_time'] = '23:59'
             
-            # 来週（来週の月曜日〜日曜日）
-            if re.search(r'来週', phrase):
-                # 来週の月曜日を計算
-                days_until_monday = (7 - now.weekday()) % 7
-                if days_until_monday == 0:  # 今日が月曜日の場合
-                    days_until_monday = 7
-                next_monday = now + timedelta(days=days_until_monday)
-                next_sunday = next_monday + timedelta(days=6)
-                
-                # 来週の7日間を個別の日付として追加
-                current_date = next_monday
-                week_dates = []
-                for i in range(7):
-                    week_dates.append({
-                        'date': current_date.strftime('%Y-%m-%d'),
-                        'time': '00:00',
-                        'end_time': '23:59'
-                    })
-                    current_date += timedelta(days=1)
-                
-                print(f"[DEBUG] 来週の7日間を生成: {[wd['date'] for wd in week_dates]}")
-                
-                # 元の日付情報を来週の最初の日（月曜日）に置き換え
-                d.update(week_dates[0])
-                print(f"[DEBUG] 来週の処理: {week_dates[0]['date']} 〜 {week_dates[6]['date']} (7日間)")
-                
-                # 残りの6日間を追加
-                for i in range(1, 7):
-                    new_dates.append(week_dates[i])
-                    print(f"[DEBUG] 来週の日付{i+1}を追加: {week_dates[i]['date']}")
-                
-                print(f"[DEBUG] 来週処理後のnew_dates数: {len(new_dates)}")
             
             # 再来週（再来週の月曜日〜日曜日）
             if re.search(r'再来週', phrase):
@@ -308,6 +276,92 @@ class AIService:
                     d['title'] = f"予定（{d.get('date', '')} {t}〜{e}）"
             new_dates.append(d)
         print(f"[DEBUG] new_dates(AI+補完): {new_dates}")
+        
+        # 来週の処理（datesループの外で実行）
+        if re.search(r'来週', original_text):
+            print(f"[DEBUG] 来週の処理を開始")
+            # 来週の月曜日を計算
+            days_until_monday = (7 - now.weekday()) % 7
+            if days_until_monday == 0:  # 今日が月曜日の場合
+                days_until_monday = 7
+            next_monday = now + timedelta(days=days_until_monday)
+            next_sunday = next_monday + timedelta(days=6)
+            
+            # 来週の7日間を個別の日付として追加
+            current_date = next_monday
+            week_dates = []
+            for i in range(7):
+                week_dates.append({
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'time': '00:00',
+                    'end_time': '23:59'
+                })
+                current_date += timedelta(days=1)
+            
+            print(f"[DEBUG] 来週の7日間を生成: {[wd['date'] for wd in week_dates]}")
+            
+            # 既存のnew_datesをクリアして来週の7日間に置き換え
+            new_dates.clear()
+            new_dates.extend(week_dates)
+            
+            print(f"[DEBUG] 来週処理後のnew_dates数: {len(new_dates)}")
+            print(f"[DEBUG] 来週処理後のnew_dates: {new_dates}")
+        
+        # 再来週の処理（datesループの外で実行）
+        if re.search(r'再来週', original_text):
+            print(f"[DEBUG] 再来週の処理を開始")
+            # 再来週の月曜日を計算
+            days_until_monday = (7 - now.weekday()) % 7
+            if days_until_monday == 0:  # 今日が月曜日の場合
+                days_until_monday = 7
+            next_next_monday = now + timedelta(days=days_until_monday + 7)
+            next_next_sunday = next_next_monday + timedelta(days=6)
+            
+            # 再来週の7日間を個別の日付として追加
+            current_date = next_next_monday
+            week_dates = []
+            for i in range(7):
+                week_dates.append({
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'time': '00:00',
+                    'end_time': '23:59'
+                })
+                current_date += timedelta(days=1)
+            
+            print(f"[DEBUG] 再来週の7日間を生成: {[wd['date'] for wd in week_dates]}")
+            
+            # 既存のnew_datesをクリアして再来週の7日間に置き換え
+            new_dates.clear()
+            new_dates.extend(week_dates)
+            
+            print(f"[DEBUG] 再来週処理後のnew_dates数: {len(new_dates)}")
+            print(f"[DEBUG] 再来週処理後のnew_dates: {new_dates}")
+        
+        # 来月の処理（datesループの外で実行）
+        if re.search(r'来月', original_text):
+            print(f"[DEBUG] 来月の処理を開始")
+            # 来月の1日を計算
+            if now.month == 12:
+                next_month = now.replace(year=now.year + 1, month=1, day=1)
+            else:
+                next_month = now.replace(month=now.month + 1, day=1)
+            
+            # 来月の末日を計算
+            if next_month.month == 12:
+                next_month_end = next_month.replace(year=next_month.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                next_month_end = next_month.replace(month=next_month.month + 1, day=1) - timedelta(days=1)
+            
+            # 既存のnew_datesをクリアして来月の1日間に置き換え
+            new_dates.clear()
+            new_dates.append({
+                'date': next_month.strftime('%Y-%m-%d'),
+                'end_date': next_month_end.strftime('%Y-%m-%d'),
+                'time': '00:00',
+                'end_time': '23:59'
+            })
+            
+            print(f"[DEBUG] 来月処理後のnew_dates: {new_dates}")
         # 2. 正規表現で漏れた枠を「追加」する（AI抽出に無い場合のみ）
         pattern1 = r'(\d{1,2})/(\d{1,2})[\s　]*([0-9]{1,2}):?([0-9]{0,2})[\-〜~]([0-9]{1,2}):?([0-9]{0,2})'
         matches1 = re.findall(pattern1, original_text)

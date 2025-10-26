@@ -227,6 +227,8 @@ class AIService:
                     })
                     current_date += timedelta(days=1)
                 
+                print(f"[DEBUG] 来週の7日間を生成: {[wd['date'] for wd in week_dates]}")
+                
                 # 元の日付情報を来週の最初の日（月曜日）に置き換え
                 d.update(week_dates[0])
                 print(f"[DEBUG] 来週の処理: {week_dates[0]['date']} 〜 {week_dates[6]['date']} (7日間)")
@@ -235,6 +237,8 @@ class AIService:
                 for i in range(1, 7):
                     new_dates.append(week_dates[i])
                     print(f"[DEBUG] 来週の日付{i+1}を追加: {week_dates[i]['date']}")
+                
+                print(f"[DEBUG] 来週処理後のnew_dates数: {len(new_dates)}")
             
             # 再来週（再来週の月曜日〜日曜日）
             if re.search(r'再来週', phrase):
@@ -560,9 +564,13 @@ class AIService:
                 print(f"[DEBUG] 本日/今日の予定を追加: {main_event}")
         
         print(f"[DEBUG] new_dates(正規表現追加後): {new_dates}")
+        print(f"[DEBUG] new_dates数: {len(new_dates)}")
         
         # 移動時間の自動追加処理
         new_dates = self._add_travel_time(new_dates, original_text)
+        
+        print(f"[DEBUG] 最終的なnew_dates数: {len(new_dates)}")
+        print(f"[DEBUG] 最終的なnew_dates: {new_dates}")
         
         parsed['dates'] = new_dates
         return parsed

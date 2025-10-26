@@ -485,12 +485,10 @@ class LineBotHandler:
                         events = self.calendar_service.get_events_for_time_range(start_dt, end_dt, line_user_id)
                         print(f"[DEBUG] 日付{i+1}の取得予定: {events}")
                         
-                        # 8:00〜22:00の間で空き時間を返す
-                        day_start = "08:00"
-                        day_end = "22:00"
-                        # 枠の範囲と8:00〜22:00の重なり部分だけを対象にする
-                        slot_start = max(start_time, day_start)
-                        slot_end = min(end_time, day_end)
+                        # AIが抽出した時間条件に基づいて空き時間を計算
+                        # 例：「19時以降」→19:00〜23:59、「午前中」→00:00〜12:00
+                        slot_start = start_time
+                        slot_end = end_time
                         
                         print(f"[DEBUG] 日付{i+1}のスロット範囲: slot_start={slot_start}, slot_end={slot_end}")
                         

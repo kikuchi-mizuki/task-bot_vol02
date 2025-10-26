@@ -5,6 +5,7 @@ from linebot import LineBotApi
 from linebot.models import TextSendMessage
 from config import Config
 import logging
+import pytz
 logging.basicConfig(level=logging.INFO)
 
 def format_rich_agenda(events_info, is_tomorrow=False):
@@ -27,7 +28,14 @@ def format_rich_agenda(events_info, is_tomorrow=False):
     return f"{header}\n" + "\n".join(lines) + footer
 
 def send_daily_agenda():
-    logging.info(f"[DEBUG] 日次予定送信開始: {datetime.now()}")
+    # 日本時間で明日の日付を計算
+    jst = pytz.timezone('Asia/Tokyo')
+    now_jst = datetime.now(jst)
+    tomorrow = now_jst.date() + timedelta(days=1)
+    
+    logging.info(f"[DEBUG] 日次予定送信開始: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} (JST)")
+    logging.info(f"[DEBUG] 明日の日付: {tomorrow}")
+    
     db = DBHelper()
     # 追加デバッグ: usersテーブル全件ダンプ
     c = db.conn.cursor()
@@ -50,8 +58,6 @@ def send_daily_agenda():
         logging.error(f'[DEBUG] usersテーブル全件取得エラー: {e}')
     calendar_service = GoogleCalendarService()
     line_bot_api = LineBotApi(Config.LINE_CHANNEL_ACCESS_TOKEN)
-    tomorrow = datetime.now().date() + timedelta(days=1)
-    logging.info(f"[DEBUG] 明日の日付: {tomorrow}")
     user_ids = db.get_all_user_ids()  # 認証済みユーザーのみ返すようにDBHelperを調整
     logging.info(f"[DEBUG] 送信対象ユーザー: {user_ids}")
 
@@ -80,7 +86,7 @@ def send_daily_agenda():
             except Exception as e2:
                 logging.error(f"[ERROR] ユーザー {user_id} への再認証案内送信エラー: {e2}")
     
-    logging.info(f"[DEBUG] 日次予定送信完了: {datetime.now()}")
+    logging.info(f"[DEBUG] 日次予定送信完了: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} (JST)")
 
 if __name__ == "__main__":
     send_daily_agenda() 

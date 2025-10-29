@@ -1,13 +1,21 @@
 import os
+import sys
+# 最初期ログ（起動確認用）
+print("[BOOT] app.py import start", flush=True)
+def _excepthook(exc_type, exc, tb):
+    import traceback
+    print("[BOOT][FATAL] Uncaught exception:", exc_type.__name__, str(exc), flush=True)
+    traceback.print_tb(tb)
+sys.excepthook = _excepthook
 import logging
 import json
 import urllib3
 import secrets
-import sys
+import sys as _sys_for_logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s:%(lineno)d - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(_sys_for_logging.stdout)]
 )
 gunicorn_error = logging.getLogger("gunicorn.error")
 if gunicorn_error.handlers:

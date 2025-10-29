@@ -3,7 +3,17 @@ import logging
 import json
 import urllib3
 import secrets
-logging.basicConfig(level=logging.INFO)
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s:%(lineno)d - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+gunicorn_error = logging.getLogger("gunicorn.error")
+if gunicorn_error.handlers:
+    root = logging.getLogger()
+    root.handlers = gunicorn_error.handlers
+    root.setLevel(gunicorn_error.level)
 
  
 
@@ -97,9 +107,12 @@ def run_scheduler_backup():
             logger.info(f"バックアップスケジューラー実行中... 現在時刻: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # バックグラウンドでスケジューラーを開始（cronジョブが動作しない場合のバックアップ）
-scheduler_thread = threading.Thread(target=run_scheduler_backup, daemon=True)
-scheduler_thread.start()
-logger.info("バックアップ用定期実行スケジューラーを開始しました")
+if os.environ.get("RUN_SCHEDULER") == "1":
+    scheduler_thread = threading.Thread(target=run_scheduler_backup, daemon=True)
+    scheduler_thread.start()
+    logger.info("バックアップ用定期実行スケジューラーを開始しました")
+else:
+    logger.info("RUN_SCHEDULER!=1 のためスケジューラー未起動")
 
 @app.route("/callback", methods=['POST'])
 def callback():

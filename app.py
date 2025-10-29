@@ -137,7 +137,22 @@ def callback():
 
     # リクエストボディを取得
     body = request.get_data(as_text=True)
-    logger.info("Request body: " + body)
+    logger.info("Webhook received (len=%s)", len(body))
+
+    # 軽量JSONパース（失敗しても後段でSDKがはじくのでOK）
+    try:
+        payload = json.loads(body)
+    except Exception:
+        payload = {}
+
+    # Verify用の高速レーン: events=[] のみ署名検証して即200
+    if isinstance(payload, dict) and payload.get("events") == []:
+        try:
+            WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET")).handle(body, signature)
+        except Exception as e:
+            logger.warning("Verify signature NG: %s", e)
+            return make_response(("bad signature", 400))
+        return "OK"
 
     if not line_ready or not handler:
         logger.warning("LINEハンドラ未準備のため /callback を 503 で返却")
@@ -150,7 +165,10 @@ def callback():
     except InvalidSignatureError:
         # 署名検証で失敗したときは例外をあげる
         logger.error("署名検証に失敗しました")
-        abort(400)
+        return make_response(("bad signature", 400))
+    except Exception as e:
+        logger.error("callback 内例外: %s", e)
+        return make_response(("internal error", 500))
 
     # 正常終了時は200を返す
     return 'OK'

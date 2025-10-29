@@ -2,29 +2,10 @@ import os
 import logging
 import json
 import urllib3
+import secrets
 logging.basicConfig(level=logging.INFO)
 
-# GOOGLE_CREDENTIALS_FILEの自動判定（JSON or パス）
-GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
-if GOOGLE_CREDENTIALS_FILE_ENV:
-    try:
-        # まずJSONとして読めるか？
-        parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
-        with open("credentials.json", "w") as f:
-            json.dump(parsed, f)
-        os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
-        print("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
-    except json.JSONDecodeError:
-        # JSONでなければパスとみなす
-        if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
-            os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
-            print(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
-        else:
-            raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
-else:
-    # 既存運用（Config.GOOGLE_CREDENTIALS_FILE を使うなど）
-    os.environ["GOOGLE_CREDENTIALS_PATH"] = getattr(Config, "GOOGLE_CREDENTIALS_FILE", "credentials.json")
-    print(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
+ 
 
 from flask import Flask, request, abort, render_template_string, redirect, url_for, session, Response, make_response
 from linebot import LineBotApi, WebhookHandler
@@ -32,7 +13,6 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from line_bot_handler import LineBotHandler
 from config import Config
-import json
 from datetime import datetime
 import pickle
 from google_auth_oauthlib.flow import Flow
@@ -45,6 +25,26 @@ from send_daily_agenda import send_daily_agenda
 import threading
 import schedule
 import time
+
+# GOOGLE_CREDENTIALS_FILEの自動判定（JSON or パス）
+GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
+if GOOGLE_CREDENTIALS_FILE_ENV:
+    try:
+        parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
+        with open("credentials.json", "w") as f:
+            json.dump(parsed, f)
+        os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
+        print("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
+    except json.JSONDecodeError:
+        if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
+            os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
+            print(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
+        else:
+            raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
+else:
+    default_path = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or os.environ.get("GOOGLE_CREDENTIALS_PATH") or "credentials.json"
+    os.environ["GOOGLE_CREDENTIALS_PATH"] = default_path
+    print(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -329,7 +329,7 @@ def onetime_login():
             logging.error(f"Google OAuth認証エラー: {e}")
             html = '''
             <!DOCTYPE html>
-            <R>
+            <html>
             <head>
                 <title>認証エラー</title>
                 <meta charset="utf-8">
@@ -375,24 +375,9 @@ def oauth2callback():
         
         # デバッグ用ログ（機微情報は出さない）
         logger.debug('[DEBUG] oauth2callback 実行（BASE_URL/Redirect URIは非表示）')
-        
-        # スコープ検証を一時的に無効化（Google OAuth同意画面の設定と一致させるため）
-        import warnings
-        import oauthlib.oauth2.rfc6749.parameters
-        
-        # スコープ検証を無効化
-        original_validate_token_parameters = oauthlib.oauth2.rfc6749.parameters.validate_token_parameters
-        def dummy_validate_token_parameters(params):
-            return True
-        oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = dummy_validate_token_parameters
-        
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                flow.fetch_token(authorization_response=request.url)
-        finally:
-            # 元の関数を復元
-            oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = original_validate_token_parameters
+
+        # Googleからのコールバックを用いてトークンを取得（モンキーパッチ不要）
+        flow.fetch_token(authorization_response=request.url)
         
         creds = flow.credentials
         # JSON 形式で保存（推奨）
@@ -503,7 +488,7 @@ def api_send_daily_agenda():
     from flask import request, jsonify
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
-    if not secret_token or req_token != secret_token:
+    if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
         send_daily_agenda()
@@ -517,7 +502,7 @@ def api_debug_users():
     from flask import request, jsonify
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
-    if not secret_token or req_token != secret_token:
+    if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     from db import DBHelper
     db = DBHelper()
@@ -533,7 +518,7 @@ def api_test_daily_agenda():
     from flask import request, jsonify
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
-    if not secret_token or req_token != secret_token:
+    if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
         send_daily_agenda()

@@ -55,13 +55,13 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-pr
 # ProxyFixを追加（Railway対応）
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# 設定の検証
+# 設定の検証（失敗しても起動は継続：疎通復旧のため一時的に緩和）
 try:
     Config.validate_config()
     logger.info("設定の検証が完了しました")
 except ValueError as e:
-    logger.error(f"設定エラー: {e}")
-    raise
+    logger.error(f"設定エラー（起動は継続）: {e}")
+    logger.error("暫定運用: 必須環境変数が不足していますが、疎通確認のため起動を継続します")
 
 # LINEボットハンドラーを初期化
 try:

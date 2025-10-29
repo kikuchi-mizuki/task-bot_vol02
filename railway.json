@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python -u app.py",
+    "startCommand": "sh -lc 'set -xe; echo [BOOT] starting; python -V; which python; env | sed -n 1,50p; python -u app.py || (echo [BOOT] python exited:$?; sleep 600)'",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",

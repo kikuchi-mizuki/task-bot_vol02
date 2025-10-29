@@ -65,22 +65,25 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-pr
 # ProxyFixを追加（Railway対応）
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# 設定の検証（失敗しても起動は継続：疎通復旧のため一時的に緩和）
+# 設定の検証（失敗しても起動は継続）
 try:
     Config.validate_config()
     logger.info("設定の検証が完了しました")
-except ValueError as e:
+except Exception as e:
     logger.error(f"設定エラー（起動は継続）: {e}")
     logger.error("暫定運用: 必須環境変数が不足していますが、疎通確認のため起動を継続します")
 
-# LINEボットハンドラーを初期化
+# LINEボットハンドラーを初期化（失敗しても起動は継続）
+line_ready = False
+handler = None
+line_bot_handler = None
 try:
     line_bot_handler = LineBotHandler()
     handler = line_bot_handler.get_handler()
+    line_ready = True
     logger.info("LINEボットハンドラーの初期化が完了しました")
 except Exception as e:
-    logger.error(f"LINEボットハンドラーの初期化に失敗しました: {e}")
-    raise
+    logger.error(f"LINEボットハンドラーの初期化に失敗しました（起動は継続）: {e}")
 
 # セキュリティのためAPIキーなどの機密情報はログに出力しない
 
@@ -127,6 +130,11 @@ def callback():
     body = request.get_data(as_text=True)
     logger.info("Request body: " + body)
 
+    if not line_ready or not handler:
+        logger.warning("LINEハンドラ未準備のため /callback を 503 で返却")
+        from flask import make_response
+        return make_response(("LINE handler not ready", 503))
+
     try:
         # 署名を検証し、問題なければhandleに定義されている関数を呼び出す
         handler.handle(body, signature)
@@ -138,77 +146,80 @@ def callback():
     # 正常終了時は200を返す
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    """テキストメッセージを処理"""
-    try:
-        logger.info(f"メッセージを受信: {event.message.text}")
-        
-        # メッセージを処理してレスポンスを取得
-        response = line_bot_handler.handle_message(event)
-        
-        # LINEにメッセージを送信（SSLエラー対応のリトライ機能付き）
-        max_retries = 5
-        retry_delay = 2  # 秒
-        
-        for attempt in range(max_retries):
-            try:
-                line_bot_handler.line_bot_api.reply_message(
-                    event.reply_token,
-                    response
-                )
-                logger.info("メッセージの処理が完了しました")
-                break
-            except Exception as send_error:
-                error_msg = str(send_error)
-                logger.warning(f"メッセージ送信試行 {attempt + 1}/{max_retries} でエラー: {error_msg}")
-                
-                # SSLエラーの場合は特別な処理
-                if "SSL SYSCALL error" in error_msg or "EOF detected" in error_msg:
-                    logger.info(f"SSLエラーを検出、{retry_delay}秒後にリトライします")
-                    logger.info(f"SSLエラー詳細: {type(send_error).__name__}: {error_msg}")
-                    import time
-                    time.sleep(retry_delay)
-                    
-                    if attempt < max_retries - 1:
-                        retry_delay *= 2  # 指数バックオフ（次の試行用）
-                        logger.info(f"次のリトライまでの待機時間: {retry_delay}秒")
-                        continue
-                    else:
-                        logger.error("SSLエラーが継続し、最大リトライ回数に達しました")
-                        raise send_error
-                
-                # その他のエラーの場合
-                if attempt == max_retries - 1:
-                    logger.error(f"最大リトライ回数に達しました: {send_error}")
-                    raise send_error
-                
-                import time
-                time.sleep(1)  # 1秒待機してからリトライ
-        
-    except Exception as e:
-        logger.error(f"メッセージ処理でエラーが発生しました: {e}")
-        # エラーが発生した場合はエラーメッセージを送信
+if line_ready and handler:
+    @handler.add(MessageEvent, message=TextMessage)
+    def handle_message(event):
+        """テキストメッセージを処理"""
         try:
-            # エラーメッセージ送信時もリトライ機能を適用
-            max_retries = 3
+            logger.info(f"メッセージを受信: {event.message.text}")
+            
+            # メッセージを処理してレスポンスを取得
+            response = line_bot_handler.handle_message(event)
+            
+            # LINEにメッセージを送信（SSLエラー対応のリトライ機能付き）
+            max_retries = 5
+            retry_delay = 2  # 秒
+            
             for attempt in range(max_retries):
                 try:
                     line_bot_handler.line_bot_api.reply_message(
                         event.reply_token,
-                        TextSendMessage(text="申し訳ございません。エラーが発生しました。しばらく時間をおいて再度お試しください。")
+                        response
                     )
-                    logger.info("エラーメッセージの送信が完了しました")
+                    logger.info("メッセージの処理が完了しました")
                     break
-                except Exception as reply_error:
-                    logger.warning(f"エラーメッセージ送信試行 {attempt + 1}/{max_retries} でエラー: {reply_error}")
-                    if attempt == max_retries - 1:
-                        logger.error(f"エラーメッセージの送信に失敗しました: {reply_error}")
-                    else:
+                except Exception as send_error:
+                    error_msg = str(send_error)
+                    logger.warning(f"メッセージ送信試行 {attempt + 1}/{max_retries} でエラー: {error_msg}")
+                    
+                    # SSLエラーの場合は特別な処理
+                    if "SSL SYSCALL error" in error_msg or "EOF detected" in error_msg:
+                        logger.info(f"SSLエラーを検出、{retry_delay}秒後にリトライします")
+                        logger.info(f"SSLエラー詳細: {type(send_error).__name__}: {error_msg}")
                         import time
-                        time.sleep(1)
-        except Exception as reply_error:
-            logger.error(f"エラーメッセージの送信に失敗しました: {reply_error}")
+                        time.sleep(retry_delay)
+                        
+                        if attempt < max_retries - 1:
+                            retry_delay *= 2  # 指数バックオフ（次の試行用）
+                            logger.info(f"次のリトライまでの待機時間: {retry_delay}秒")
+                            continue
+                        else:
+                            logger.error("SSLエラーが継続し、最大リトライ回数に達しました")
+                            raise send_error
+                    
+                    # その他のエラーの場合
+                    if attempt == max_retries - 1:
+                        logger.error(f"最大リトライ回数に達しました: {send_error}")
+                        raise send_error
+                    
+                    import time
+                    time.sleep(1)  # 1秒待機してからリトライ
+            
+        except Exception as e:
+            logger.error(f"メッセージ処理でエラーが発生しました: {e}")
+            # エラーが発生した場合はエラーメッセージを送信
+            try:
+                # エラーメッセージ送信時もリトライ機能を適用
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        line_bot_handler.line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="申し訳ございません。エラーが発生しました。しばらく時間をおいて再度お試しください。")
+                        )
+                        logger.info("エラーメッセージの送信が完了しました")
+                        break
+                    except Exception as reply_error:
+                        logger.warning(f"エラーメッセージ送信試行 {attempt + 1}/{max_retries} でエラー: {reply_error}")
+                        if attempt == max_retries - 1:
+                            logger.error(f"エラーメッセージの送信に失敗しました: {reply_error}")
+                        else:
+                            import time
+                            time.sleep(1)
+            except Exception as reply_error:
+                logger.error(f"エラーメッセージの送信に失敗しました: {reply_error}")
+else:
+    logger.warning("LINEハンドラ未準備のため、MessageEventハンドラを登録しません")
 
 @app.route("/", methods=['GET'])
 def index():
@@ -218,7 +229,7 @@ def index():
 @app.route("/health", methods=['GET'])
 def health():
     """ヘルスチェック用エンドポイント"""
-    return {"status": "healthy", "service": "line-calendar-bot"}
+    return {"status": "healthy", "service": "line-calendar-bot", "degraded": (not line_ready)}
 
 @app.route("/test", methods=['GET'])
 def test():

@@ -48,9 +48,11 @@ if GOOGLE_CREDENTIALS_FILE_ENV:
     except json.JSONDecodeError:
         if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
             os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
-            print(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
+            logger.info(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
         else:
-            raise RuntimeError("GOOGLE_CREDENTIALS_FILE がJSONでも有効なパスでもありません")
+            fallback = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or "credentials.json"
+            os.environ["GOOGLE_CREDENTIALS_PATH"] = fallback
+            logger.error("GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました")
 else:
     default_path = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or os.environ.get("GOOGLE_CREDENTIALS_PATH") or "credentials.json"
     os.environ["GOOGLE_CREDENTIALS_PATH"] = default_path
@@ -87,8 +89,15 @@ except Exception as e:
 
 # セキュリティのためAPIキーなどの機密情報はログに出力しない
 
-# DBヘルパーの初期化
-db_helper = DBHelper()
+# DBヘルパーの初期化（失敗しても起動継続）
+db_ready = False
+db_helper = None
+try:
+    db_helper = DBHelper()
+    db_ready = True
+    logger.info("DB初期化が完了しました")
+except Exception as e:
+    logger.error(f"DB初期化に失敗しました（起動は継続）: {e}")
 
 # 定期実行スケジューラーの設定（バックアップ用）
 def run_scheduler_backup():
@@ -229,7 +238,15 @@ def index():
 @app.route("/health", methods=['GET'])
 def health():
     """ヘルスチェック用エンドポイント"""
-    return {"status": "healthy", "service": "line-calendar-bot", "degraded": (not line_ready)}
+    return {
+        "status": "healthy",
+        "service": "line-calendar-bot",
+        "degraded": (not line_ready) or (not db_ready),
+        "components": {
+            "line": "ready" if line_ready else "not_ready",
+            "db": "ready" if db_ready else "not_ready"
+        }
+    }
 
 @app.route("/test", methods=['GET'])
 def test():
@@ -510,6 +527,8 @@ def debug_ai_test():
 def api_send_daily_agenda():
     import os
     from flask import request, jsonify
+    if not db_ready:
+        return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
@@ -524,6 +543,8 @@ def api_send_daily_agenda():
 def api_debug_users():
     import os
     from flask import request, jsonify
+    if not db_ready:
+        return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
@@ -540,6 +561,8 @@ def api_test_daily_agenda():
     """手動で明日の予定一覧送信をテスト"""
     import os
     from flask import request, jsonify
+    if not db_ready:
+        return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
     req_token = request.args.get('token')
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):

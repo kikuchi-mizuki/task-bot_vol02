@@ -21,20 +21,39 @@ from flask import Flask, request, abort, render_template_string, redirect, url_f
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from line_bot_handler import LineBotHandler
 from config import Config
 from datetime import datetime
 import pickle
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 # from googleapiclient.discovery import build  # 使ってなければ削除
-from db import DBHelper
 from werkzeug.middleware.proxy_fix import ProxyFix
-from ai_service import AIService
-from send_daily_agenda import send_daily_agenda
 import threading
 import schedule
 import time
+
+# 危険なモジュールは遅延/防御的に読み込む
+LineBotHandler = None
+try:
+    from line_bot_handler import LineBotHandler  # noqa: F401
+except Exception as e:
+    logger = logging.getLogger(__name__)
+    logger.error("line_bot_handler import failed: %s", e)
+
+DBHelper = None
+try:
+    from db import DBHelper  # noqa: F401
+except Exception as e:
+    logger = logging.getLogger(__name__)
+    logger.error("db import failed: %s", e)
+
+def _lazy_ai_service():
+    from ai_service import AIService  # noqa: WPS433
+    return AIService()
+
+def _lazy_send_daily_agenda():
+    from send_daily_agenda import send_daily_agenda as _send  # noqa: WPS433
+    return _send
 
 # GOOGLE_CREDENTIALS_FILEの自動判定（JSON or パス）
 GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
@@ -106,7 +125,7 @@ def run_scheduler_backup():
     from datetime import datetime
     
     jst = pytz.timezone('Asia/Tokyo')
-    schedule.every().day.at("19:00").do(send_daily_agenda)
+    schedule.every().day.at("19:00").do(_lazy_send_daily_agenda())
     
     logger.info("バックアップ用スケジューラーを開始しました（毎日19:00に明日の予定を送信）")
     
@@ -464,7 +483,7 @@ def debug_ai_test():
                 return jsonify({"error": "テキストが入力されていません"})
             
             # AIサービスでテスト
-            ai_service = AIService()
+            ai_service = _lazy_ai_service()
             result = ai_service.extract_dates_and_times(text)
             
             return jsonify({
@@ -552,7 +571,7 @@ def api_send_daily_agenda():
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
-        send_daily_agenda()
+        _lazy_send_daily_agenda()()
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -586,7 +605,7 @@ def api_test_daily_agenda():
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
-        send_daily_agenda()
+        _lazy_send_daily_agenda()()
         return jsonify({'status': 'ok', 'message': '明日の予定一覧を送信しました'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

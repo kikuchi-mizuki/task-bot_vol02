@@ -31,10 +31,8 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from config import Config
 from datetime import datetime
-import pickle
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
-# from googleapiclient.discovery import build  # 使ってなければ削除
 from werkzeug.middleware.proxy_fix import ProxyFix
 import threading
 import schedule
@@ -75,11 +73,11 @@ if GOOGLE_CREDENTIALS_FILE_ENV:
     except json.JSONDecodeError:
         if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
             os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
-            logger.info(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
+            print(f"[DEBUG] Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}", flush=True)
         else:
             fallback = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or "credentials.json"
             os.environ["GOOGLE_CREDENTIALS_PATH"] = fallback
-            logger.error("GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました")
+            print("[ERROR] GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました", flush=True)
 else:
     default_path = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or os.environ.get("GOOGLE_CREDENTIALS_PATH") or "credentials.json"
     os.environ["GOOGLE_CREDENTIALS_PATH"] = default_path
@@ -441,7 +439,7 @@ def onetime_login():
             db_helper.save_oauth_state(state, line_user_id)
             return redirect(auth_url)
         except Exception as e:
-            logging.error(f"Google OAuth認証エラー: {e}")
+            logger.error(f"Google OAuth認証エラー: {e}")
             html = '''
             <!DOCTYPE html>
             <html>

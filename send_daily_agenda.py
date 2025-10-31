@@ -6,6 +6,7 @@ from linebot.models import TextSendMessage
 from config import Config
 import logging
 import pytz
+import time
 logging.basicConfig(level=logging.INFO)
 
 def format_rich_agenda(events_info, is_tomorrow=False):
@@ -119,7 +120,6 @@ def send_daily_agenda():
                         logging.warning(f"[WARNING] メッセージ送信試行 {attempt + 1}/{max_retries} でエラー: {error_msg}")
                         
                         if attempt < max_retries - 1:
-                            import time
                             time.sleep(retry_delay)
                             retry_delay *= 2
                         else:
@@ -154,7 +154,6 @@ def send_daily_agenda():
                         except Exception as auth_send_error:
                             logging.warning(f"[WARNING] 再認証案内送信試行 {attempt_auth + 1}/{max_retries_auth} でエラー: {auth_send_error}")
                             if attempt_auth < max_retries_auth - 1:
-                                import time
                                 time.sleep(1)
                             else:
                                 logging.error(f"[ERROR] ユーザー {user_id} への再認証案内送信エラー: {auth_send_error}")

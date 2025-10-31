@@ -129,44 +129,65 @@ except Exception as e:
     logger.error(f"設定エラー（起動は継続）: {e}")
     logger.error("暫定運用: 必須環境変数が不足していますが、疎通確認のため起動を継続します")
 
+# BOOT_MODEの確認（lightモードでは軽量起動）
+BOOT_MODE = os.environ.get('BOOT_MODE', 'full').lower()
+DISABLE_LINE = os.environ.get('DISABLE_LINE', '0') == '1'
+DISABLE_DB = os.environ.get('DISABLE_DB', '0') == '1'
+
+print(f"[BOOT] BOOT_MODE: {BOOT_MODE}", flush=True)
+print(f"[BOOT] DISABLE_LINE: {DISABLE_LINE}", flush=True)
+print(f"[BOOT] DISABLE_DB: {DISABLE_DB}", flush=True)
+logger.info(f"BOOT_MODE: {BOOT_MODE}, DISABLE_LINE: {DISABLE_LINE}, DISABLE_DB: {DISABLE_DB}")
+
 # BASE_URLの事前チェック（OAuth redirect_uri mismatch予防）
-try:
-    base_url = os.getenv('BASE_URL')
-    if not base_url:
-        logger.warning("BASE_URL未設定（OAuth認証に必要）")
-    else:
-        if not base_url.startswith("https://"):
-            logger.error("BASE_URLはhttpsで始まる必要があります（OAuth認証のため）")
-        if base_url.endswith("/"):
-            logger.error("BASE_URL末尾の/は不要です（redirect_uri mismatchの原因になります）")
-        if base_url.startswith("https://") and not base_url.endswith("/"):
-            logger.info("BASE_URLは妥当です")
-except Exception as e:
-    logger.warning(f"BASE_URLの確認: {e}")
+if BOOT_MODE != 'light':
+    try:
+        base_url = os.getenv('BASE_URL')
+        if not base_url:
+            logger.warning("BASE_URL未設定（OAuth認証に必要）")
+        else:
+            if not base_url.startswith("https://"):
+                logger.error("BASE_URLはhttpsで始まる必要があります（OAuth認証のため）")
+            if base_url.endswith("/"):
+                logger.error("BASE_URL末尾の/は不要です（redirect_uri mismatchの原因になります）")
+            if base_url.startswith("https://") and not base_url.endswith("/"):
+                logger.info("BASE_URLは妥当です")
+    except Exception as e:
+        logger.warning(f"BASE_URLの確認: {e}")
 
 # LINEボットハンドラーを初期化（失敗しても起動は継続）
 line_ready = False
 handler = None
 line_bot_handler = None
-try:
-    line_bot_handler = LineBotHandler()
-    handler = line_bot_handler.get_handler()
-    line_ready = True
-    logger.info("LINEボットハンドラーの初期化が完了しました")
-except Exception as e:
-    logger.error(f"LINEボットハンドラーの初期化に失敗しました（起動は継続）: {e}")
+if BOOT_MODE == 'light' or DISABLE_LINE:
+    logger.info("LINEボットハンドラーの初期化をスキップしました（BOOT_MODE=light または DISABLE_LINE=1）")
+else:
+    try:
+        line_bot_handler = LineBotHandler()
+        handler = line_bot_handler.get_handler()
+        line_ready = True
+        logger.info("LINEボットハンドラーの初期化が完了しました")
+    except Exception as e:
+        logger.error(f"LINEボットハンドラーの初期化に失敗しました（起動は継続）: {e}")
+        import traceback
+        traceback.print_exc()
 
 # セキュリティのためAPIキーなどの機密情報はログに出力しない
 
 # DBヘルパーの初期化（失敗しても起動継続）
 db_ready = False
 db_helper = None
-try:
-    db_helper = DBHelper()
-    db_ready = True
-    logger.info("DB初期化が完了しました")
-except Exception as e:
-    logger.error(f"DB初期化に失敗しました（起動は継続）: {e}")
+if BOOT_MODE == 'light' or DISABLE_DB:
+    logger.info("DB初期化をスキップしました（BOOT_MODE=light または DISABLE_DB=1）")
+else:
+    try:
+        db_helper = DBHelper()
+        db_ready = True
+        logger.info("DB初期化が完了しました")
+    except Exception as e:
+        logger.error(f"DB初期化に失敗しました（起動は継続）: {e}")
+        import traceback
+        traceback.print_exc()
 
 # 定期実行スケジューラーの設定（バックアップ用）
 def run_scheduler_backup():
@@ -217,7 +238,10 @@ def run_scheduler_backup():
                     logger.error(f"手動トリガーによる予定送信でエラー: {e}")
 
 # バックグラウンドでスケジューラーを開始（cronジョブが動作しない場合のバックアップ）
-if os.environ.get("RUN_SCHEDULER") == "1":
+# lightモードではスケジューラーを起動しない
+if BOOT_MODE == 'light':
+    logger.info("BOOT_MODE=light のためスケジューラー未起動")
+elif os.environ.get("RUN_SCHEDULER") == "1":
     scheduler_thread = threading.Thread(target=run_scheduler_backup, daemon=True)
     scheduler_thread.start()
     logger.info("バックアップ用定期実行スケジューラーを開始しました")

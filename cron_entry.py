@@ -89,6 +89,29 @@ def main() -> None:
 if __name__ == "__main__":
     # Webと混同しないよう、実行中だけフラグ設定（必要に応じて）
     os.environ["RUN_SCHEDULER"] = "0"
+    os.environ.setdefault("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+    
+    # Google認証ファイルの環境変数からの書き出し処理（app.pyと同じロジック）
+    try:
+        import json
+        GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
+        if GOOGLE_CREDENTIALS_FILE_ENV:
+            try:
+                parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
+                with open("credentials.json", "w") as f:
+                    json.dump(parsed, f)
+                os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
+                logger.info("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
+            except json.JSONDecodeError:
+                if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
+                    os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
+                    logger.info(f"Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}")
+                else:
+                    fallback = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+                    os.environ["GOOGLE_CREDENTIALS_PATH"] = fallback
+                    logger.error("GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました")
+    except Exception as e:
+        logger.warning(f"Google認証ファイル処理でエラー（続行）: {e}")
     
     # 確実に終了するため、sys.exitを明示的に呼び出す
     try:

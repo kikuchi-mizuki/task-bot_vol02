@@ -199,16 +199,15 @@ def callback():
     """LINE Webhookのコールバックエンドポイント（即ACK - 1秒以内に200返却）"""
     from flask import make_response
     
-    # リクエストヘッダーからX-Line-Signatureを取得（安全に）
+    # リクエストヘッダーからX-Line-Signatureを取得
     signature = request.headers.get('X-Line-Signature')
     if not signature:
-        logger.error('X-Line-Signature ヘッダがありません')
         return make_response(("bad request", 400))
-
+    
     # リクエストボディを取得
     body = request.get_data(as_text=True)
     logger.info("Webhook received (len=%s)", len(body))
-
+    
     # 軽量JSONパース（失敗しても後段でSDKがはじくのでOK）
     try:
         payload = json.loads(body)
@@ -223,17 +222,13 @@ def callback():
             logger.debug("Verify signature NG: %s", e)
             return make_response(("bad signature", 400))
         return "OK"
-
+    
     # 非同期処理でLINEメッセージを処理（即座に200を返す）
     def _process():
         try:
             if not line_ready or not handler:
-                logger.warning("LINEハンドラ未準備")
                 return
-            
-            # 署名を検証し、問題なければhandleに定義されている関数を呼び出す
             handler.handle(body, signature)
-            logger.info("Webhook async process done")
         except InvalidSignatureError:
             logger.error("署名検証に失敗しました")
         except Exception as e:

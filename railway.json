@@ -13,8 +13,7 @@
   "environments": {
     "production": {
       "variables": {
-        "TZ": "Asia/Tokyo",
-        "WEB_CONCURRENCY": "2"
+        "TZ": "Asia/Tokyo"
       }
     }
   }

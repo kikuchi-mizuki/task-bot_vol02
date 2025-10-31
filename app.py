@@ -649,7 +649,18 @@ def api_test_daily_agenda():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    
+    # 起動ログを明示的に出力（stdout/stderrに確実に出力）
+    print("=" * 60, flush=True)
+    print("[BOOT] LINE Calendar Bot を起動しています...", flush=True)
+    print(f"[BOOT] PORT: {port}", flush=True)
+    print(f"[BOOT] Python: {sys.version}", flush=True)
+    print("=" * 60, flush=True)
+    
+    logger.info("=" * 60)
     logger.info("LINE Calendar Bot を起動しています...")
+    logger.info(f"PORT: {port}")
+    logger.info(f"Python: {sys.version}")
     
     # SSL設定の確認
     import ssl
@@ -661,5 +672,19 @@ if __name__ == "__main__":
     logger.info(f"Requests バージョン: {requests.__version__}")
     logger.info(f"urllib3 バージョン: {urllib3.__version__}")
     
+    # コンポーネントの状態を確認
+    logger.info(f"LINE Bot Handler: {'ready' if line_ready else 'not ready'}")
+    logger.info(f"Database: {'ready' if db_ready else 'not ready'}")
+    
+    logger.info("=" * 60)
+    logger.info(f"サーバーを起動します: http://0.0.0.0:{port}")
+    logger.info("=" * 60)
+    print(f"[BOOT] サーバーを起動します: http://0.0.0.0:{port}", flush=True)
+    
     # 本番は gunicorn 起動（gunicorn app:app）推奨。デバッグはローカルのみ
-    app.run(debug=True, host='0.0.0.0', port=port) 
+    try:
+        app.run(debug=False, host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.error(f"サーバー起動エラー: {e}")
+        print(f"[BOOT][FATAL] サーバー起動エラー: {e}", flush=True)
+        raise 

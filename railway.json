@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "sh -lc 'set -xe; echo [BOOT] starting; python -V; which python; env | sed -n 1,50p; python -u app.py || (echo [BOOT] python exited:$?; sleep 600)'",
+    "startCommand": "sh -lc 'set -xe; echo \"[BOOT] ============================================\"; echo \"[BOOT] Starting application...\"; echo \"[BOOT] Python version:\"; python -V; echo \"[BOOT] Python path:\"; which python; echo \"[BOOT] Working directory:\"; pwd; echo \"[BOOT] ============================================\"; python -u app.py || (echo \"[BOOT][FATAL] Application exited with code: $?\"; sleep 600)'",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",

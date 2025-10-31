@@ -12,16 +12,25 @@ import json
 import urllib3
 import secrets
 import sys as _sys_for_logging
+
+# ログ設定（stdoutとstderrの両方に出力）
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s:%(lineno)d - %(message)s",
-    handlers=[logging.StreamHandler(_sys_for_logging.stdout)]
+    handlers=[
+        logging.StreamHandler(_sys_for_logging.stdout),
+        logging.StreamHandler(_sys_for_logging.stderr)  # gunicornはstderrに出力
+    ],
+    force=True  # 既存のハンドラを上書き
 )
+
+# gunicornのログ設定を統合
 gunicorn_error = logging.getLogger("gunicorn.error")
 if gunicorn_error.handlers:
     root = logging.getLogger()
     root.handlers = gunicorn_error.handlers
     root.setLevel(gunicorn_error.level)
+    print("[BOOT] Gunicorn logger handlers detected", flush=True)
 
  
 

@@ -196,12 +196,14 @@ else:
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    """LINE Webhookのコールバックエンドポイント"""
+    """LINE Webhookのコールバックエンドポイント（即ACK - 1秒以内に200返却）"""
+    from flask import make_response
+    
     # リクエストヘッダーからX-Line-Signatureを取得（安全に）
     signature = request.headers.get('X-Line-Signature')
     if not signature:
         logger.error('X-Line-Signature ヘッダがありません')
-        abort(400)
+        return make_response(("bad request", 400))
 
     # リクエストボディを取得
     body = request.get_data(as_text=True)
@@ -218,28 +220,30 @@ def callback():
         try:
             WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET")).handle(body, signature)
         except Exception as e:
-            logger.warning("Verify signature NG: %s", e)
+            logger.debug("Verify signature NG: %s", e)
             return make_response(("bad signature", 400))
         return "OK"
 
-    if not line_ready or not handler:
-        logger.warning("LINEハンドラ未準備のため /callback を 503 で返却")
-        from flask import make_response
-        return make_response(("LINE handler not ready", 503))
-
-    try:
-        # 署名を検証し、問題なければhandleに定義されている関数を呼び出す
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        # 署名検証で失敗したときは例外をあげる
-        logger.error("署名検証に失敗しました")
-        return make_response(("bad signature", 400))
-    except Exception as e:
-        logger.error("callback 内例外: %s", e)
-        return make_response(("internal error", 500))
-
-    # 正常終了時は200を返す
-    return 'OK'
+    # 非同期処理でLINEメッセージを処理（即座に200を返す）
+    def _process():
+        try:
+            if not line_ready or not handler:
+                logger.warning("LINEハンドラ未準備")
+                return
+            
+            # 署名を検証し、問題なければhandleに定義されている関数を呼び出す
+            handler.handle(body, signature)
+            logger.info("Webhook async process done")
+        except InvalidSignatureError:
+            logger.error("署名検証に失敗しました")
+        except Exception as e:
+            logger.error("callback async 例外: %s", e)
+    
+    # バックグラウンドで処理を実行（daemon=Trueで即座に200を返す）
+    threading.Thread(target=_process, daemon=True).start()
+    
+    # 即座に200を返す（LINEの1秒応答要件に対応）
+    return "OK"
 
 if line_ready and handler:
     @handler.add(MessageEvent, message=TextMessage)
@@ -320,6 +324,11 @@ else:
 def index():
     """ヘルスチェック用エンドポイント"""
     return "LINE Calendar Bot is running!"
+
+@app.route("/_debug/ping", methods=['GET'])
+def _ping():
+    """疎通確認用の軽いエンドポイント"""
+    return "pong", 200
 
 @app.route("/health", methods=['GET'])
 def health():

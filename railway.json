@@ -4,16 +4,17 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "sh -lc 'set -xe; echo \"[BOOT] ============================================\"; echo \"[BOOT] Starting application...\"; echo \"[BOOT] Python version:\"; python -V; echo \"[BOOT] Python path:\"; which python; echo \"[BOOT] Working directory:\"; pwd; echo \"[BOOT] ============================================\"; python -u app.py || (echo \"[BOOT][FATAL] Application exited with code: $?\"; sleep 600)'",
+    "startCommand": "gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT app:app",
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 100,
+    "healthcheckTimeout": 20,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   },
   "environments": {
     "production": {
       "variables": {
-        "TZ": "Asia/Tokyo"
+        "TZ": "Asia/Tokyo",
+        "WEB_CONCURRENCY": "2"
       }
     }
   }

@@ -32,7 +32,6 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from config import Config
 from datetime import datetime
 from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
 from werkzeug.middleware.proxy_fix import ProxyFix
 import threading
 import schedule
@@ -90,7 +89,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # ProxyFixを追加（Railway対応）
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # 設定の検証（失敗しても起動は継続）
 try:
@@ -99,6 +98,21 @@ try:
 except Exception as e:
     logger.error(f"設定エラー（起動は継続）: {e}")
     logger.error("暫定運用: 必須環境変数が不足していますが、疎通確認のため起動を継続します")
+
+# BASE_URLの事前チェック（OAuth redirect_uri mismatch予防）
+try:
+    base_url = os.getenv('BASE_URL')
+    if not base_url:
+        logger.warning("BASE_URL未設定（OAuth認証に必要）")
+    else:
+        if not base_url.startswith("https://"):
+            logger.error("BASE_URLはhttpsで始まる必要があります（OAuth認証のため）")
+        if base_url.endswith("/"):
+            logger.error("BASE_URL末尾の/は不要です（redirect_uri mismatchの原因になります）")
+        if base_url.startswith("https://") and not base_url.endswith("/"):
+            logger.info("BASE_URLは妥当です")
+except Exception as e:
+    logger.warning(f"BASE_URLの確認: {e}")
 
 # LINEボットハンドラーを初期化（失敗しても起動は継続）
 line_ready = False
@@ -337,6 +351,10 @@ def test():
 @app.route('/onetime_login', methods=['GET', 'POST'])
 def onetime_login():
     """ワンタイムコード認証ページ"""
+    from flask import make_response
+    if not db_ready or db_helper is None:
+        return make_response(("DB not ready", 503))
+    
     if request.method == 'GET':
         # ワンタイムコード入力フォームを表示
         html = '''
@@ -466,6 +484,9 @@ def onetime_login():
 def oauth2callback():
     """Google OAuth認証コールバック"""
     from flask import make_response
+    if not db_ready or db_helper is None:
+        return make_response(("DB not ready", 503))
+    
     try:
         # stateからline_user_idを取得
         state = request.args.get('state')
@@ -595,6 +616,10 @@ def debug_ai_test():
     """
     return render_template_string(test_form)
 
+def _get_agenda_token(req):
+    """トークンをヘッダーまたはクエリパラメータから取得（互換性のため両方対応）"""
+    return req.headers.get('X-Agenda-Token') or req.args.get('token')
+
 @app.route('/api/send_daily_agenda', methods=['POST'])
 def api_send_daily_agenda():
     import os
@@ -602,7 +627,7 @@ def api_send_daily_agenda():
     if not db_ready:
         return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
-    req_token = request.args.get('token')
+    req_token = _get_agenda_token(request)
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
@@ -618,15 +643,16 @@ def api_debug_users():
     if not db_ready:
         return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
-    req_token = request.args.get('token')
+    req_token = _get_agenda_token(request)
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     from db import DBHelper
     db = DBHelper()
     c = db.conn.cursor()
-    c.execute('SELECT line_user_id, LENGTH(google_token), created_at, updated_at FROM users')
+    # セキュリティ: line_user_idのみ返す（メタ情報の露出を防ぐ）
+    c.execute('SELECT line_user_id FROM users')
     rows = c.fetchall()
-    return jsonify({'users': rows})
+    return jsonify({'users': [row[0] for row in rows]})
 
 @app.route('/api/test_daily_agenda', methods=['POST'])
 def api_test_daily_agenda():
@@ -636,7 +662,7 @@ def api_test_daily_agenda():
     if not db_ready:
         return jsonify({'status': 'error', 'message': 'DB not ready'}), 503
     secret_token = os.environ.get('DAILY_AGENDA_SECRET_TOKEN')
-    req_token = request.args.get('token')
+    req_token = _get_agenda_token(request)
     if not secret_token or not req_token or not secrets.compare_digest(req_token, secret_token):
         return jsonify({'status': 'error', 'message': 'Invalid or missing token'}), 403
     try:
@@ -663,7 +689,8 @@ if __name__ == "__main__":
     # SSL設定の確認
     import ssl
     logger.info(f"SSL バージョン: {ssl.OPENSSL_VERSION}")
-    logger.info(f"利用可能なSSLプロトコル: {ssl._PROTOCOL_NAMES}")
+    names = getattr(ssl, "_PROTOCOL_NAMES", None)
+    logger.info(f"利用可能なSSLプロトコル: {names or 'N/A'}")
     
     # ネットワーク設定の確認
     import requests

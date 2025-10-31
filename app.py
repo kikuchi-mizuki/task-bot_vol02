@@ -133,17 +133,46 @@ def run_scheduler_backup():
     from datetime import datetime
     
     jst = pytz.timezone('Asia/Tokyo')
-    schedule.every().day.at("19:00").do(_lazy_send_daily_agenda())
     
-    logger.info("バックアップ用スケジューラーを開始しました（毎日19:00に明日の予定を送信）")
+    # タイムゾーンを明示的に設定
+    os.environ['TZ'] = 'Asia/Tokyo'
+    try:
+        time.tzset()  # Unix系OSでタイムゾーンを再設定
+    except AttributeError:
+        # Windowsではtzsetが存在しないためスキップ
+        pass
+    
+    # スケジュールを設定（JST 19:00）
+    send_func = _lazy_send_daily_agenda()
+    schedule.every().day.at("19:00").do(send_func)
+    
+    # 現在時刻をログ出力
+    now_utc = datetime.now(pytz.UTC)
+    now_jst = datetime.now(jst)
+    logger.info(f"バックアップ用スケジューラーを開始しました（毎日19:00 JSTに明日の予定を送信）")
+    logger.info(f"現在時刻（UTC）: {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"現在時刻（JST）: {now_jst.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    last_execution_date = None
     
     while True:
         schedule.run_pending()
         time.sleep(60)  # 1分ごとにチェック
-        # 毎時間ログ出力
-        current_time = datetime.now(jst)
-        if current_time.minute == 0:
-            logger.info(f"バックアップスケジューラー実行中... 現在時刻: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # 毎時間ログ出力（デバッグ用）
+        current_time_jst = datetime.now(jst)
+        if current_time_jst.minute == 0:
+            logger.info(f"バックアップスケジューラー実行中... 現在時刻（JST）: {current_time_jst.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 19:00になったら手動で実行をトリガー（念のため）
+            if current_time_jst.hour == 19 and last_execution_date != current_time_jst.date():
+                logger.info("19:00を検出。手動で予定送信をトリガーします")
+                try:
+                    send_func()
+                    last_execution_date = current_time_jst.date()
+                    logger.info("手動トリガーによる予定送信が完了しました")
+                except Exception as e:
+                    logger.error(f"手動トリガーによる予定送信でエラー: {e}")
 
 # バックグラウンドでスケジューラーを開始（cronジョブが動作しない場合のバックアップ）
 if os.environ.get("RUN_SCHEDULER") == "1":

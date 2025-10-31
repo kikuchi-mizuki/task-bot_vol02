@@ -61,35 +61,56 @@ def _lazy_send_daily_agenda():
     return _send
 
 # GOOGLE_CREDENTIALS_FILEの自動判定（JSON or パス）
-GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
-if GOOGLE_CREDENTIALS_FILE_ENV:
-    try:
-        parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
-        with open("credentials.json", "w") as f:
-            json.dump(parsed, f)
-        os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
-        print("Google認証ファイルをJSON形式からcredentials.jsonに変換しました")
-    except json.JSONDecodeError:
-        if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
-            os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
-            print(f"[DEBUG] Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}", flush=True)
-        else:
-            fallback = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or "credentials.json"
-            os.environ["GOOGLE_CREDENTIALS_PATH"] = fallback
-            print("[ERROR] GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました", flush=True)
-else:
-    default_path = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or os.environ.get("GOOGLE_CREDENTIALS_PATH") or "credentials.json"
-    os.environ["GOOGLE_CREDENTIALS_PATH"] = default_path
-    print(f"デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}")
+# 注意: Configをimportしてから使用（Config.validate_config()より前でも安全）
+try:
+    GOOGLE_CREDENTIALS_FILE_ENV = os.environ.get("GOOGLE_CREDENTIALS_FILE")
+    if GOOGLE_CREDENTIALS_FILE_ENV:
+        try:
+            parsed = json.loads(GOOGLE_CREDENTIALS_FILE_ENV)
+            with open("credentials.json", "w") as f:
+                json.dump(parsed, f)
+            os.environ["GOOGLE_CREDENTIALS_PATH"] = "credentials.json"
+            print("[BOOT] Google認証ファイルをJSON形式からcredentials.jsonに変換しました", flush=True)
+        except json.JSONDecodeError:
+            if os.path.exists(GOOGLE_CREDENTIALS_FILE_ENV):
+                os.environ["GOOGLE_CREDENTIALS_PATH"] = GOOGLE_CREDENTIALS_FILE_ENV
+                print(f"[BOOT] Google認証ファイルパスを使用: {GOOGLE_CREDENTIALS_FILE_ENV}", flush=True)
+            else:
+                # Config.GOOGLE_CREDENTIALS_FILEを安全に取得
+                try:
+                    fallback = getattr(Config, "GOOGLE_CREDENTIALS_FILE", "credentials.json")
+                except Exception:
+                    fallback = "credentials.json"
+                os.environ["GOOGLE_CREDENTIALS_PATH"] = fallback
+                print("[BOOT][ERROR] GOOGLE_CREDENTIALS_FILE が不正。フォールバックに切替えました", flush=True)
+    else:
+        # Config.GOOGLE_CREDENTIALS_FILEを安全に取得
+        try:
+            default_path = getattr(Config, "GOOGLE_CREDENTIALS_FILE", None) or os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+        except Exception:
+            default_path = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+        os.environ["GOOGLE_CREDENTIALS_PATH"] = default_path
+        print(f"[BOOT] デフォルトのGoogle認証ファイルパスを使用: {os.environ['GOOGLE_CREDENTIALS_PATH']}", flush=True)
+except Exception as e:
+    # 初期化エラーでも起動は継続
+    print(f"[BOOT][WARNING] Google認証ファイル設定エラー（起動継続）: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
+    os.environ.setdefault("GOOGLE_CREDENTIALS_PATH", "credentials.json")
 
 # ログ設定
 logger = logging.getLogger(__name__)
 
+# Flaskアプリの初期化
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # ProxyFixを追加（Railway対応）
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+try:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+    print("[BOOT] ProxyFix設定完了", flush=True)
+except Exception as e:
+    print(f"[BOOT][WARNING] ProxyFix設定エラー（起動継続）: {e}", flush=True)
 
 # 設定の検証（失敗しても起動は継続）
 try:
@@ -314,6 +335,10 @@ if line_ready and handler:
                 logger.error(f"エラーメッセージの送信に失敗しました: {reply_error}")
 else:
     logger.warning("LINEハンドラ未準備のため、MessageEventハンドラを登録しません")
+
+# gunicorn起動時の確認ログ（モジュールimport完了の確認）
+print("[BOOT] app.py module loaded successfully", flush=True)
+logger.info("app.py module loaded successfully")
 
 @app.route("/", methods=['GET'])
 def index():
